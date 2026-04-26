@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { BookOpen, Code, CheckCircle, Circle, Printer, MonitorPlay, ChevronRight, Menu, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { BookOpen, Code, CheckCircle, Circle, Printer, MonitorPlay, ChevronRight, Menu, X, MessageCircle, Bot, Send, Loader2 } from 'lucide-react';
 
 // --- BAZA DANYCH KURSU ---
 const courseData = {
@@ -250,6 +250,15 @@ export default function App() {
   const [completedLessons, setCompletedLessons] = useState(new Set());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  // --- AI CHAT STATE ---
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([
+    { role: 'model', text: 'Cześć! Jestem Twoim asystentem AI. W czym mogę Ci dzisiaj pomóc? Jeśli masz problem z zadaniem, po prostu napisz!' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatScrollRef = useRef(null);
+
   const currentModule = courseData[activeModule];
   const currentLesson = currentModule.lessons[activeLessonIndex];
 
@@ -267,6 +276,64 @@ export default function App() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  // --- AI CHAT LOGIC ---
+  useEffect(() => {
+    // Automatyczne przewijanie czatu w dół po nowej wiadomości
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || isChatLoading) return;
+
+    // Dodanie wiadomości użytkownika
+    const newUserMessage = { role: 'user', text: chatInput };
+    setChatMessages(prev => [...prev, newUserMessage]);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    try {
+      const apiKey = ""; // API Key dostarczany z zewnątrz przez platformę
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+      // Przygotowanie historii
+      const historyContents = chatMessages.map(msg => ({
+        role: msg.role,
+        parts: [{ text: msg.text }]
+      }));
+
+      // Instrukcja systemowa + historia + nowa wiadomość
+      const payload = {
+        systemInstruction: {
+          parts: [{ text: `Jesteś wspierającym nauczycielem programowania w aplikacji kursowej. Pomagasz uczniowi. Bądź zwięzły i miły. Zamiast dawać gotowe odpowiedzi, naprowadzaj go na właściwy tor. Tłumacz cierpliwie błędy. Uczeń przerabia właśnie moduł: ${currentModule.title}, lekcję: "${currentLesson.title}". Treść tej lekcji to: "${currentLesson.theory}".` }]
+        },
+        contents: [
+          ...historyContents,
+          { role: 'user', parts: [{ text: chatInput }] }
+        ]
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) throw new Error('Błąd API AI');
+      
+      const data = await response.json();
+      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Przepraszam, nie zrozumiałem.';
+      
+      setChatMessages(prev => [...prev, { role: 'model', text: aiText }]);
+    } catch (error) {
+      console.error("AI Error:", error);
+      setChatMessages(prev => [...prev, { role: 'model', text: 'Błąd połączenia z serwerem AI. Spróbuj ponownie za chwilę.' }]);
+    } finally {
+      setIsChatLoading(false);
+    }
   };
 
   return (
@@ -411,6 +478,82 @@ export default function App() {
 
         </article>
       </main>
+
+      {/* --- AI CHATBOT UI --- */}
+      <div className="fixed bottom-6 right-6 z-50 print:hidden flex flex-col items-end">
+        
+        {/* Okno czatu */}
+        {isChatOpen && (
+          <div className="bg-white rounded-2xl shadow-2xl border border-gray-200 w-80 sm:w-96 h-[500px] max-h-[80vh] mb-4 flex flex-col overflow-hidden transition-all duration-300">
+            {/* Nagłówek */}
+            <div className="bg-indigo-600 p-4 text-white flex justify-between items-center shadow-md z-10">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/20 p-2 rounded-full">
+                  <Bot className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">AI Nauczyciel</h3>
+                  <p className="text-[10px] text-indigo-200 uppercase tracking-wider">Zawsze gotowy do pomocy</p>
+                </div>
+              </div>
+              <button onClick={() => setIsChatOpen(false)} className="text-indigo-200 hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-1 rounded-full">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Obszar wiadomości */}
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50 flex flex-col gap-4 scroll-smooth">
+              {chatMessages.map((msg, idx) => (
+                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`max-w-[85%] p-3 text-sm leading-relaxed shadow-sm ${
+                    msg.role === 'user' 
+                      ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-sm' 
+                      : 'bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-tl-sm'
+                  }`}>
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              {isChatLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-white border border-gray-200 p-3 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-2 text-gray-500 text-sm">
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-600" /> Myślę...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Obszar wpisywania */}
+            <div className="p-3 border-t border-gray-200 bg-white flex gap-2 items-center">
+              <input 
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder="Zadaj pytanie (np. nie rozumiem pętli...)"
+                className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 border border-transparent focus:border-indigo-300 transition-all"
+              />
+              <button 
+                onClick={handleSendMessage}
+                disabled={isChatLoading || !chatInput.trim()}
+                className="bg-indigo-600 text-white p-2 rounded-full hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Przycisk otwierający */}
+        <button 
+          onClick={() => setIsChatOpen(!isChatOpen)}
+          className={`text-white p-4 rounded-full shadow-xl transition-all duration-300 hover:scale-110 flex items-center justify-center gap-2 ${
+            isChatOpen ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'
+          }`}
+        >
+          {isChatOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+        </button>
+      </div>
 
     </div>
   );
